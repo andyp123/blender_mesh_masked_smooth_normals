@@ -106,7 +106,7 @@ def set_specific_normal_vector(mesh_data, normal):
     me.calc_normals_split()
     clnors = [loop.normal for loop in me.loops]
 
-    normal.normalize()
+    n = normal.normalized()
 
     for p in me.polygons:
         if p.select:
@@ -238,6 +238,35 @@ class FlipCustomNormals(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class SetSpecificNormalVector(bpy.types.Operator):
+    """Precisely set the normals of selected vertices"""
+    bl_idname = "mesh.set_specific_custom_normal"
+    bl_label = "Set Specific Custom Normals"
+    bl_options = {'REGISTER','UNDO'}
+
+    custom_normal = bpy.props.FloatVectorProperty(
+        name = "vertex normal",
+        default = (0.0,0.0,1.0),
+        subtype = 'DIRECTION',
+        description = "Value to set selected vertex normals to"
+        )
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.object  
+        return obj is not None and obj.mode == 'EDIT' 
+
+    def execute(self, context):
+        mesh_data = context.object.data
+        mesh_data.use_auto_smooth = True
+
+        bpy.ops.object.mode_set(mode='OBJECT')
+        set_specific_normal_vector(mesh_data, self.custom_normal)
+        bpy.ops.object.mode_set(mode='EDIT')
+
+        return {'FINISHED'}
+
+
 class SoftenHardenNormalsPanel(bpy.types.Panel):
     """COMMENT"""
     bl_space_type = "VIEW_3D"
@@ -255,6 +284,9 @@ class SoftenHardenNormalsPanel(bpy.types.Panel):
         row.operator("mesh.masked_harden_normals", text="Harden")
         row = layout.row(align=True)
         row.operator("mesh.masked_flip_custom_normals", text="Flip Direction")
+        row = layout.row(align=True)
+        row.prop
+        row.operator("mesh.set_specific_custom_normal", text="Set Normals")
 
 
 # operator registration
@@ -263,12 +295,14 @@ def register():
     bpy.utils.register_class(MaskedHardenNormals)
     bpy.utils.register_class(FlipCustomNormals)
     bpy.utils.register_class(SoftenHardenNormalsPanel)
+    bpy.utils.register_class(SetSpecificNormalVector)
 
 def unregister():
     bpy.utils.unregister_class(MaskedSoftenNormals)
     bpy.utils.unregister_class(MaskedHardenNormals)
     bpy.utils.unregister_class(FlipCustomNormals)
     bpy.utils.unregister_class(SoftenHardenNormalsPanel)
+    bpy.utils.unregister_class(SetSpecificNormalVector)
   
 if __name__ == "__main__":  
     register()  
