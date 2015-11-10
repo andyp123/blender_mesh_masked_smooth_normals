@@ -163,7 +163,7 @@ class MaskedSoftenNormals(bpy.types.Operator):
 
     always_use_face_mask = bpy.props.BoolProperty(
         name = "only use faces",
-        default = True,
+        default = False,
         subtype = 'NONE',
         description = "Only mask using selected faces regardless of the current selection mode"
         )
