@@ -24,13 +24,31 @@ import mathutils
 bl_info = {
     "name": "Masked Soften/Harden Normals",
     "author": "Andrew Palmer",
-    "version": (0, 0, 3),
+    "version": (0, 0, 4),
     "blender": (2, 75, 0),
     "location": "",
     "description": "Soften/Harden the vertex normals of a mesh using the current selection as a mask that defines which normals are affected.",
     "category": "Mesh"
 }
 
+
+def get_linked_faces(vertex, smooth_mode, ignore_selection=False):
+    """Get faces linked to a particular vertex with mode and selection options"""
+
+    if smooth_mode == "face":
+        # smooth based only on selected faces
+        ls_faces = [f for f in vertex.link_faces if f.select or ignore_selection] 
+    elif smooth_mode == "edge":
+        # smooth based on faces linked to selected edges
+        ls_edges = [e for e in vertex.link_edges if e.select or ignore_selection]
+        ls_faces = []
+        for e in ls_edges:
+            ls_faces.extend(e.link_faces)
+    else:
+        # smooth based on all neighboring faces
+        ls_faces = [f for f in vertex.link_faces]
+
+    return ls_faces
 
 # OPERATES IN OBJECT MODE ONLY
 def set_smooth_normals(mesh_data, vertex_indices, vertex_normals):
@@ -79,7 +97,8 @@ def flip_normals(mesh_data):
     me.normals_split_custom_set(clnors)
 
 
-# OPERATES IN EDIT MODE ONLY
+# TODO: This should work on edge and vertex selections
+# OPERATES IN OBJECT MODE ONLY
 def harden_normals(mesh_data):
     """Harden normals based on selected faces"""
 
@@ -97,7 +116,7 @@ def harden_normals(mesh_data):
     me.normals_split_custom_set(clnors)
 
 
-# OPERATES IN EDIT MODE ONLY
+# OPERATES IN OBJECT MODE ONLY
 def set_specific_normal_vector(mesh_data, normal):
     """Set the selected normals to a specific direction vector"""
 
@@ -129,18 +148,7 @@ def get_smoothed_vertex_normals(mesh_data, smooth_mode="face"):
     selected_verts = [v for v in bm.verts if v.select]
 
     for v in selected_verts:
-        if smooth_mode == "face":
-            # smooth based only on selected faces
-            ls_faces = [f for f in v.link_faces if f.select] 
-        elif smooth_mode == "edge":
-            # smooth based on faces linked to selected edges
-            ls_edges = [e for e in v.link_edges if e.select]
-            ls_faces = []
-            for e in ls_edges:
-                ls_faces.extend(e.link_faces)
-        else:
-            # smooth based on all neighboring faces
-            ls_faces = [f for f in v.link_faces]
+        ls_faces = get_linked_faces(v, smooth_mode)
 
         # set vertex normal to average of face normals
         if len(ls_faces) > 0:
@@ -153,6 +161,80 @@ def get_smoothed_vertex_normals(mesh_data, smooth_mode="face"):
             vertex_normals.append(vertex_normal)
 
     return {'vertex_indices': vertex_indices, 'vertex_normals': vertex_normals}
+
+
+# TODO: Store face areas to avoid repeat calculation
+#       add together area of neighboring face with the same normal
+# OPERATES IN EDIT MODE ONLY
+def get_face_weighted_normals(mesh_data, smooth_mode="face"):
+    """Smooth normals weighted by face area"""
+
+    bm = bmesh.from_edit_mesh(mesh_data)
+    smooth_all = (smooth_mode == "all")
+
+    vertex_indices = []
+    vertex_normals = []
+
+    if smooth_all:
+        selected_verts = [v for v in bm.verts]
+    else:
+        selected_verts = [v for v in bm.verts if v.select]
+
+    for v in selected_verts:
+        if smooth_all:
+            ls_faces = [f for f in v.link_faces]
+        else:
+            ls_faces = get_linked_faces(v, smooth_mode)
+
+        if len(ls_faces) > 0:
+            sum_normal = mathutils.Vector()
+            for f in ls_faces:
+                sum_normal += f.normal * f.calc_area()
+            vertex_indices.append(v.index)
+            vertex_normal = sum_normal / len(ls_faces)
+            vertex_normal.normalize()
+            vertex_normals.append(vertex_normal)
+
+    return {'vertex_indices': vertex_indices, 'vertex_normals': vertex_normals}
+
+
+class FaceWeightedNormals(bpy.types.Operator):
+    """Smooth custom normals weighted by face area"""
+    bl_idname = "mesh.face_weighted_normals"
+    bl_label = "Face Weighted Normals"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        mesh_data = context.object.data
+        mesh_data.use_auto_smooth = True
+
+        initial_mode = context.object.mode
+
+        # get selection mode (VERT, EDGE, FACE)
+        if initial_mode == "OBJECT":
+            smooth_mode = "all"
+        else:
+            select_mode = context.tool_settings.mesh_select_mode
+            if select_mode[2] or self.always_use_face_mask:
+                smooth_mode = "face"
+            elif select_mode[1]:
+                smooth_mode = "edge"
+            else:
+                smooth_mode = "vertex"
+
+        bpy.ops.object.mode_set(mode="EDIT")
+        vn = get_face_weighted_normals(mesh_data, smooth_mode)
+
+        bpy.ops.object.mode_set(mode="OBJECT")
+        set_smooth_normals(mesh_data, vn['vertex_indices'], vn['vertex_normals'])
+        bpy.ops.object.mode_set(mode=initial_mode)
+
+        return {'FINISHED'}
+
+    @classmethod  
+    def poll(cls, context):  
+        obj = context.object  
+        return obj is not None and obj.type == "MESH"
 
 
 class MaskedSoftenNormals(bpy.types.Operator):
@@ -190,7 +272,7 @@ class MaskedSoftenNormals(bpy.types.Operator):
     @classmethod  
     def poll(cls, context):  
         obj = context.object  
-        return obj is not None and obj.mode == 'EDIT' 
+        return obj is not None and obj.type == "MESH" and obj.mode == 'EDIT' 
 
 
 # TODO: Make a harden normals tool that works in the same way as smooth normals
@@ -213,7 +295,7 @@ class MaskedHardenNormals(bpy.types.Operator):
     @classmethod  
     def poll(cls, context):  
         obj = context.object  
-        return obj is not None and obj.mode == 'EDIT' 
+        return obj is not None and obj.type == "MESH" and obj.mode == 'EDIT' 
 
 
 class FlipCustomNormals(bpy.types.Operator):
@@ -225,7 +307,7 @@ class FlipCustomNormals(bpy.types.Operator):
     @classmethod
     def poll(cls, context):
         obj = context.object  
-        return obj is not None and obj.mode == 'EDIT' 
+        return obj is not None and obj.type == "MESH" and obj.mode == 'EDIT' 
 
     def execute(self, context):
         mesh_data = context.object.data
@@ -245,23 +327,37 @@ class SetSpecificNormalVector(bpy.types.Operator):
     bl_options = {'REGISTER','UNDO'}
 
     custom_normal = bpy.props.FloatVectorProperty(
-        name = "vertex normal",
+        name = "vertex normal direction",
         default = (0.0,0.0,1.0),
         subtype = 'DIRECTION',
         description = "Value to set selected vertex normals to"
+        )
+    allow_split_normals = bpy.props.BoolProperty(
+        name = "allow split normals",
+        default = False,
+        subtype = 'NONE',
+        description = "Allow split normals at edge of face selection"
         )
 
     @classmethod
     def poll(cls, context):
         obj = context.object  
-        return obj is not None and obj.mode == 'EDIT' 
+        return obj is not None and obj.type == "MESH" and obj.mode == 'EDIT' 
 
     def execute(self, context):
         mesh_data = context.object.data
         mesh_data.use_auto_smooth = True
 
-        bpy.ops.object.mode_set(mode='OBJECT')
-        set_specific_normal_vector(mesh_data, self.custom_normal)
+        if context.tool_settings.mesh_select_mode[2] and self.allow_split_normals:
+            bpy.ops.object.mode_set(mode='OBJECT')
+            set_specific_normal_vector(mesh_data, self.custom_normal)
+        else:
+            bm = bmesh.from_edit_mesh(mesh_data)
+            vertex_indices = [v.index for v in bm.verts if v.select]
+            vertex_normals = [self.custom_normal] * len(vertex_indices)
+            bpy.ops.object.mode_set(mode='OBJECT')
+            set_smooth_normals(mesh_data, vertex_indices, vertex_normals)
+        
         bpy.ops.object.mode_set(mode='EDIT')
 
         return {'FINISHED'}
@@ -279,30 +375,35 @@ class SoftenHardenNormalsPanel(bpy.types.Panel):
         layout = self.layout
 
         obj = context.object
-        row = layout.row(align=True)
+        col = layout.column(align=True)
+        row = col.row(align=True)
+        row.operator("mesh.face_weighted_normals", text="Set Weighted Normals")
+        row = col.row(align=True)
         row.operator("mesh.masked_soften_normals", text="Soften")
         row.operator("mesh.masked_harden_normals", text="Harden")
-        row = layout.row(align=True)
+        col = layout.column(align=True)
+        row = col.row(align=True)
         row.operator("mesh.masked_flip_custom_normals", text="Flip Direction")
-        row = layout.row(align=True)
-        row.prop
-        row.operator("mesh.set_specific_custom_normal", text="Set Normals")
+        row = col.row(align=True)
+        row.operator("mesh.set_specific_custom_normal", text="Set Direction")
 
 
 # operator registration
 def register():  
     bpy.utils.register_class(MaskedSoftenNormals)
     bpy.utils.register_class(MaskedHardenNormals)
+    bpy.utils.register_class(FaceWeightedNormals)
     bpy.utils.register_class(FlipCustomNormals)
-    bpy.utils.register_class(SoftenHardenNormalsPanel)
     bpy.utils.register_class(SetSpecificNormalVector)
+    bpy.utils.register_class(SoftenHardenNormalsPanel)
 
 def unregister():
     bpy.utils.unregister_class(MaskedSoftenNormals)
     bpy.utils.unregister_class(MaskedHardenNormals)
+    bpy.utils.unregister_class(FaceWeightedNormals)
     bpy.utils.unregister_class(FlipCustomNormals)
-    bpy.utils.unregister_class(SoftenHardenNormalsPanel)
     bpy.utils.unregister_class(SetSpecificNormalVector)
+    bpy.utils.unregister_class(SoftenHardenNormalsPanel)
   
 if __name__ == "__main__":  
     register()  
