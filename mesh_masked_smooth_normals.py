@@ -215,7 +215,7 @@ class FaceWeightedNormals(bpy.types.Operator):
             smooth_mode = "all"
         else:
             select_mode = context.tool_settings.mesh_select_mode
-            if select_mode[2] or self.always_use_face_mask:
+            if select_mode[2]:
                 smooth_mode = "face"
             elif select_mode[1]:
                 smooth_mode = "edge"
