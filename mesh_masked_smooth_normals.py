@@ -152,11 +152,10 @@ def get_smoothed_vertex_normals(mesh_data, smooth_mode="face"):
 
         # set vertex normal to average of face normals
         if len(ls_faces) > 0:
-            sum_normal = mathutils.Vector()
+            vertex_normal = mathutils.Vector()
             for f in ls_faces:
-                sum_normal += f.normal
+                vertex_normal += f.normal
             vertex_indices.append(v.index)
-            vertex_normal = sum_normal / len(ls_faces)
             vertex_normal.normalize()
             vertex_normals.append(vertex_normal)
 
@@ -187,11 +186,10 @@ def get_face_weighted_normals(mesh_data, smooth_mode="face"):
             ls_faces = get_linked_faces(v, smooth_mode)
 
         if len(ls_faces) > 0:
-            sum_normal = mathutils.Vector()
+            vertex_normal = mathutils.Vector()
             for f in ls_faces:
-                sum_normal += f.normal * f.calc_area()
+                vertex_normal += f.normal * f.calc_area()
             vertex_indices.append(v.index)
-            vertex_normal = sum_normal / len(ls_faces)
             vertex_normal.normalize()
             vertex_normals.append(vertex_normal)
 
